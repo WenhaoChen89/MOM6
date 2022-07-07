@@ -133,7 +133,7 @@ subroutine dumbbell_initialize_thickness ( h, depth_tot, G, GV, US, param_file, 
   call get_param(param_file, mdl,"REGRIDDING_COORDINATE_MODE", verticalCoordinate, &
                  default=DEFAULT_COORDINATE_MODE, do_not_log=just_read)
   call get_param(param_file, mdl, "USE_REGRIDDING", use_ALE, do_not_log = .true.)
-  if(.not. use_ALE) verticalCoordinate = "LAYER"	
+  if(.not. use_ALE) verticalCoordinate = "LAYER"
 
   ! WARNING: this routine specifies the interface heights so that the last layer
   !          is vanished, even at maximum depth. In order to have a uniform
@@ -162,7 +162,7 @@ subroutine dumbbell_initialize_thickness ( h, depth_tot, G, GV, US, param_file, 
         endif
         eta1D(1) = 0.0
         eta1D(nz+1) = -depth_tot(i,j)
-        if (x<0.0) then      	
+        if (x<0.0) then
           do k=nz,2, -1
             eta1D(k) =  eta1D(k+1) + min_thickness
           enddo
