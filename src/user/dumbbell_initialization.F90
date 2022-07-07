@@ -458,11 +458,11 @@ subroutine dumbbell_initialize_sponges(G, GV, US, tv, h_in, depth_tot, param_fil
         S(i,j,k)= tv%S(i,j,k)
       enddo
     enddo ; enddo
-    
+
     !  This call sets up the damping rates and interface heights.
     !  This sets the inverse damping timescale fields in the sponges.    !
     call initialize_sponge(Idamp, eta, G, param_file, CSp, GV)
-    
+
     !  The remaining calls to set_up_sponge_field can be in any order. !
     if ( associated(tv%S) ) call set_up_sponge_field(S, tv%S, G, GV, nz, CSp)
  endif
