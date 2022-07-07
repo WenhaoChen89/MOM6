@@ -113,8 +113,8 @@ subroutine dumbbell_initialize_thickness ( h, depth_tot, G, GV, US, param_file, 
   real :: S_light, S_dense ! The lightest and densest salinities in the sponges [S ~> ppt].
   real :: eta_IC_quanta   ! The granularity of quantization of intial interface heights [Z-1 ~> m-1].
   logical :: dbrotate     ! If true, rotate the domain.
-  logical :: use_ALE 	  ! True if ALE is being used, False if in layered mode
-  
+  logical :: use_ALE      ! True if ALE is being used, False if in layered mode
+
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
   character(len=20) :: verticalCoordinate
@@ -132,7 +132,7 @@ subroutine dumbbell_initialize_thickness ( h, depth_tot, G, GV, US, param_file, 
                  units='m', default=1.0e-3, scale=US%m_to_Z, do_not_log=just_read)
   call get_param(param_file, mdl,"REGRIDDING_COORDINATE_MODE", verticalCoordinate, &
                  default=DEFAULT_COORDINATE_MODE, do_not_log=just_read)
-  call get_param(param_file, mdl, "USE_REGRIDDING", use_ALE, do_not_log = .true.) 
+  call get_param(param_file, mdl, "USE_REGRIDDING", use_ALE, do_not_log = .true.)
   if(.not. use_ALE) verticalCoordinate = "LAYER"	
 
   ! WARNING: this routine specifies the interface heights so that the last layer
@@ -148,36 +148,34 @@ subroutine dumbbell_initialize_thickness ( h, depth_tot, G, GV, US, param_file, 
 
   select case ( coordinateMode(verticalCoordinate) )
   case ( REGRIDDING_LAYER) ! Initial thicknesses for isopycnal coordinates
-  	call get_param(param_file, mdl, "DUMBBELL_ROTATION", dbrotate, &
+    call get_param(param_file, mdl, "DUMBBELL_ROTATION", dbrotate, &
                 'Logical for rotation of dumbbell domain.',&
                  units='nondim', default=.false., do_not_log=just_read)
     do j=js,je
       do i=is,ie
        ! Compute normalized zonal coordinates (x,y=0 at center of domain)
         if (dbrotate) then
-          	! This is really y in the rotated case
-          	x = G%geoLatT(i,j)
+          ! This is really y in the rotated case
+          x = G%geoLatT(i,j)
         else
-          	x = G%geoLonT(i,j) 
+          x = G%geoLonT(i,j)
         endif
-  
-  	  eta1D(1) = 0.0
-  	  eta1D(nz+1) = -depth_tot(i,j)
+        eta1D(1) = 0.0
+        eta1D(nz+1) = -depth_tot(i,j)
         if (x<0.0) then      	
           do k=nz,2, -1
             eta1D(k) =  eta1D(k+1) + min_thickness
-          enddo        
+          enddo
         else
           do k=2,nz
             eta1D(k) =  eta1D(k-1) - min_thickness
           enddo
         endif
-        
         do k=1,nz
-        	h(i,j,k) = GV%Z_to_H * (eta1D(k) - eta1D(k+1))
+          h(i,j,k) = GV%Z_to_H * (eta1D(k) - eta1D(k+1))
         enddo
-    enddo; enddo 
-       
+    enddo; enddo
+
   case ( REGRIDDING_RHO, REGRIDDING_HYCOM1) ! Initial thicknesses for isopycnal coordinates
     call get_param(param_file, mdl, "INITIAL_SSS", S_surf, &
                    units='1e-3', default=34., scale=US%ppt_to_S, do_not_log=.true.)
@@ -278,7 +276,7 @@ subroutine dumbbell_initialize_temperature_salinity ( T, S, h, G, GV, US, param_
   call get_param(param_file, mdl, "USE_REGRIDDING", use_ALE, do_not_log = .true.)
   if(.not. use_ALE) call MOM_error(FATAL,  "dumbbell_initialize_temperature_salinity: "//&
                "Please use 'fit' for 'TS_CONFIG' in the LAYER mode.")
-               
+
   call get_param(param_file, mdl, "REGRIDDING_COORDINATE_MODE", verticalCoordinate, &
                  default=DEFAULT_COORDINATE_MODE, do_not_log=just_read)
   call get_param(param_file, mdl, "INITIAL_DENSITY_PROFILE", density_profile, &
@@ -449,26 +447,25 @@ subroutine dumbbell_initialize_sponges(G, GV, US, tv, h_in, depth_tot, param_fil
       endif
     enddo ; enddo
   if (associated(tv%S)) call set_up_ALE_sponge_field(S, G, GV, tv%S, ACSp)
-  
  else
     do j=G%jsc,G%jec ; do i=G%isc,G%iec
       eta(i,j,1) = 0.0
       do k=2,nz
-      	eta(i,j,k) = eta(i,j,k-1)-h_in(i,j,k-1)
-	  enddo
-	  eta(i,j,nz+1) = -depth_tot(i,j)
-      do k=1,nz
-      	S(i,j,k)= tv%S(i,j,k)
+        eta(i,j,k) = eta(i,j,k-1)-h_in(i,j,k-1)
       enddo
-  	enddo ; enddo
-
-	!  This call sets up the damping rates and interface heights.
-	!  This sets the inverse damping timescale fields in the sponges.    !
-  	call initialize_sponge(Idamp, eta, G, param_file, CSp, GV)
-
-	!  The remaining calls to set_up_sponge_field can be in any order. !
-  	if ( associated(tv%S) ) call set_up_sponge_field(S, tv%S, G, GV, nz, CSp)
- endif    
+      eta(i,j,nz+1) = -depth_tot(i,j)
+      do k=1,nz
+        S(i,j,k)= tv%S(i,j,k)
+      enddo
+    enddo ; enddo
+    
+    !  This call sets up the damping rates and interface heights.
+    !  This sets the inverse damping timescale fields in the sponges.    !
+    call initialize_sponge(Idamp, eta, G, param_file, CSp, GV)
+    
+    !  The remaining calls to set_up_sponge_field can be in any order. !
+    if ( associated(tv%S) ) call set_up_sponge_field(S, tv%S, G, GV, nz, CSp)
+ endif
 
 end subroutine dumbbell_initialize_sponges
 
