@@ -232,7 +232,7 @@ subroutine initialize_RGC_tracer(restart, day, G, GV, h, diag, OBC, CS, &
         do m=1,1
         ! This is needed to force the compiler not to do a copy in the sponge calls.
           tr_ptr => CS%tr(:,:,:,m)
-          call set_up_ALE_sponge_field(temp, G, GV, tr_ptr, sponge_CSp, 'RGC_tracer')
+          call set_up_ALE_sponge_field(temp, G, GV, tr_ptr, sponge_CSp)
         enddo
         deallocate(temp)
       endif

@@ -2113,11 +2113,9 @@ subroutine initialize_sponges_file(G, GV, US, use_temperature, tv, u, v, depth_t
       if (use_temperature) then
         allocate(tmp_tr(isd:ied,jsd:jed,nz_data))
         call MOM_read_data(filename, potemp_var, tmp_tr(:,:,:), G%Domain, scale=US%degC_to_C)
-        call set_up_ALE_sponge_field(tmp_tr, G, GV, tv%S, ALE_CSp, 'temp', &
-               sp_long_name='temperature', sp_unit = 'degC s-1')
+        call set_up_ALE_sponge_field(tmp_tr, G, GV, tv%T, ALE_CSp)
         call MOM_read_data(filename, salin_var, tmp_tr(:,:,:), G%Domain, scale=US%ppt_to_S)
-        call set_up_ALE_sponge_field(tmp_tr, G, GV, tv%S, ALE_CSp, 'salt', &
-               sp_long_name='salinity', sp_unit = 'g kg-1 s-1')
+        call set_up_ALE_sponge_field(tmp_tr, G, GV, tv%S, ALE_CSp)
         deallocate(tmp_tr)
       endif
       if (sponge_uv) then
@@ -2140,10 +2138,8 @@ subroutine initialize_sponges_file(G, GV, US, use_temperature, tv, u, v, depth_t
       endif
       ! The remaining calls to set_up_sponge_field can be in any order.
       if ( use_temperature) then
-        call set_up_ALE_sponge_field(filename, potemp_var, Time, G, GV, US, tv%T, ALE_CSp, &
-               'temp', sp_long_name='temperature', sp_unit = 'degC s-1', scale=US%C_to_degC)
-        call set_up_ALE_sponge_field(filename, salin_var, Time, G, GV, US, tv%S, ALE_CSp, &
-               'salt', sp_long_name='salinity', sp_unit = 'g kg-1 s-1', scale=US%S_to_ppt)
+        call set_up_ALE_sponge_field(filename, potemp_var, Time, G, GV, US, tv%T, ALE_CSp, scale=US%C_to_degC)
+        call set_up_ALE_sponge_field(filename, salin_var, Time, G, GV, US, tv%S, ALE_CSp, scale=US%S_to_ppt)
       endif
       if (sponge_uv) then
         filename = trim(inputdir)//trim(state_uv_file)
