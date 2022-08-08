@@ -40,8 +40,8 @@ use MOM_get_input,            only : Get_MOM_Input, directories
 use MOM_io,                   only : MOM_io_init, vardesc, var_desc
 use MOM_io,                   only : slasher, file_exists, MOM_read_data
 use MOM_obsolete_params,      only : find_obsolete_params
-use MOM_restart,              only : register_restart_field, register_restart_pair
-use MOM_restart,              only : query_initialized, save_restart, restart_registry_lock
+use MOM_restart,              only : register_restart_field, register_restart_pair, save_restart
+use MOM_restart,              only : query_initialized, set_initialized, restart_registry_lock
 use MOM_restart,              only : restart_init, is_new_run, determine_is_new_run, MOM_restart_CS
 use MOM_spatial_means,        only : global_mass_integral
 use MOM_time_manager,         only : time_type, real_to_time, time_type_to_real, operator(+)
@@ -122,7 +122,7 @@ use MOM_tracer_hor_diff,       only : tracer_hordiff, tracer_hor_diff_init
 use MOM_tracer_hor_diff,       only : tracer_hor_diff_end, tracer_hor_diff_CS
 use MOM_tracer_registry,       only : tracer_registry_type, register_tracer, tracer_registry_init
 use MOM_tracer_registry,       only : register_tracer_diagnostics, post_tracer_diagnostics_at_sync
-use MOM_tracer_registry,       only : post_tracer_transport_diagnostics
+use MOM_tracer_registry,       only : post_tracer_transport_diagnostics, MOM_tracer_chksum
 use MOM_tracer_registry,       only : preALE_tracer_diagnostics, postALE_tracer_diagnostics
 use MOM_tracer_registry,       only : lock_tracer_registry, tracer_registry_end
 use MOM_tracer_flow_control,   only : call_tracer_register, tracer_flow_control_CS
@@ -329,13 +329,14 @@ type, public :: MOM_control_struct ; private
                                 !! if a bulk mixed layer is being used.
   logical :: check_bad_sfc_vals !< If true, scan surface state for ridiculous values.
   real    :: bad_val_ssh_max    !< Maximum SSH before triggering bad value message [Z ~> m]
-  real    :: bad_val_sst_max    !< Maximum SST before triggering bad value message [degC]
-  real    :: bad_val_sst_min    !< Minimum SST before triggering bad value message [degC]
-  real    :: bad_val_sss_max    !< Maximum SSS before triggering bad value message [ppt]
+  real    :: bad_val_sst_max    !< Maximum SST before triggering bad value message [C ~> degC]
+  real    :: bad_val_sst_min    !< Minimum SST before triggering bad value message [C ~> degC]
+  real    :: bad_val_sss_max    !< Maximum SSS before triggering bad value message [S ~> ppt]
   real    :: bad_val_col_thick  !< Minimum column thickness before triggering bad value message [Z ~> m]
-  logical :: answers_2018       !< If true, use expressions for the surface properties that recover
-                                !! the answers from the end of 2018. Otherwise, use more appropriate
-                                !! expressions that differ at roundoff for non-Boussinesq cases.
+  integer :: answer_date        !< The vintage of the expressions for the surface properties.  Values
+                                !! below 20190101 recover the answers from the end of 2018, while
+                                !! higher values use more appropriate expressions that differ at
+                                !! roundoff for non-Boussinesq cases.
   logical :: use_particles      !< Turns on the particles package
   character(len=10) :: particle_type !< Particle types include: surface(default), profiling and sail drone.
 
@@ -1288,10 +1289,13 @@ subroutine step_MOM_tracer_dyn(CS, G, GV, US, h, Time_local)
   else
     x_first = (MODULO(G%first_direction,2) == 0)
   endif
+  if (CS%debug) call MOM_tracer_chksum("Pre-advect ", CS%tracer_Reg, G)
   call advect_tracer(h, CS%uhtr, CS%vhtr, CS%OBC, CS%t_dyn_rel_adv, G, GV, US, &
                      CS%tracer_adv_CSp, CS%tracer_Reg, x_first_in=x_first)
+  if (CS%debug) call MOM_tracer_chksum("Post-advect ", CS%tracer_Reg, G)
   call tracer_hordiff(h, CS%t_dyn_rel_adv, CS%MEKE, CS%VarMix, G, GV, US, &
                       CS%tracer_diff_CSp, CS%tracer_Reg, CS%tv)
+  if (CS%debug) call MOM_tracer_chksum("Post-diffuse ", CS%tracer_Reg, G)
   if (showCallTree) call callTree_waypoint("finished tracer advection/diffusion (step_MOM)")
   call update_segment_tracer_reservoirs(G, GV, CS%uhtr, CS%vhtr, h, CS%OBC, &
                      CS%t_dyn_rel_adv, CS%tracer_Reg)
@@ -1820,7 +1824,11 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                                ! with accumulated heat deficit returned to surface ocean.
   logical :: bound_salinity    ! If true, salt is added to keep salinity above
                                ! a minimum value, and the deficit is reported.
+  integer :: default_answer_date  ! The default setting for the various ANSWER_DATE flags.
   logical :: default_2018_answers ! The default setting for the various 2018_ANSWERS flags.
+  logical :: answers_2018      ! If true, use expressions for the surface properties that recover
+                               ! the answers from the end of 2018. Otherwise, use more appropriate
+                               ! expressions that differ at roundoff for non-Boussinesq cases.
   logical :: use_conT_absS     ! If true, the prognostics T & S are conservative temperature
                                ! and absolute salinity. Care should be taken to convert them
                                ! to potential temperature and practical salinity before
@@ -2129,28 +2137,41 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                  units="m", default=20.0, scale=US%m_to_Z)
     call get_param(param_file, "MOM", "BAD_VAL_SSS_MAX", CS%bad_val_sss_max, &
                  "The value of SSS above which a bad value message is "//&
-                 "triggered, if CHECK_BAD_SURFACE_VALS is true.", units="PPT", &
-                 default=45.0)
+                 "triggered, if CHECK_BAD_SURFACE_VALS is true.", &
+                 units="PPT", default=45.0, scale=US%ppt_to_S)
     call get_param(param_file, "MOM", "BAD_VAL_SST_MAX", CS%bad_val_sst_max, &
                  "The value of SST above which a bad value message is "//&
                  "triggered, if CHECK_BAD_SURFACE_VALS is true.", &
-                 units="deg C", default=45.0)
+                 units="deg C", default=45.0, scale=US%degC_to_C)
     call get_param(param_file, "MOM", "BAD_VAL_SST_MIN", CS%bad_val_sst_min, &
                  "The value of SST below which a bad value message is "//&
                  "triggered, if CHECK_BAD_SURFACE_VALS is true.", &
-                 units="deg C", default=-2.1)
+                 units="deg C", default=-2.1, scale=US%degC_to_C)
     call get_param(param_file, "MOM", "BAD_VAL_COLUMN_THICKNESS", CS%bad_val_col_thick, &
                  "The value of column thickness below which a bad value message is "//&
                  "triggered, if CHECK_BAD_SURFACE_VALS is true.", &
                  units="m", default=0.0, scale=US%m_to_Z)
   endif
+  call get_param(param_file, "MOM", "DEFAULT_ANSWER_DATE", default_answer_date, &
+                 "This sets the default value for the various _ANSWER_DATE parameters.", &
+                 default=99991231)
   call get_param(param_file, "MOM", "DEFAULT_2018_ANSWERS", default_2018_answers, &
                  "This sets the default value for the various _2018_ANSWERS parameters.", &
-                 default=.false.)
-  call get_param(param_file, "MOM", "SURFACE_2018_ANSWERS", CS%answers_2018, &
+                 default=(default_answer_date<20190101))
+  call get_param(param_file, "MOM", "SURFACE_2018_ANSWERS", answers_2018, &
                  "If true, use expressions for the surface properties that recover the answers "//&
                  "from the end of 2018. Otherwise, use more appropriate expressions that differ "//&
                  "at roundoff for non-Boussinesq cases.", default=default_2018_answers)
+  ! Revise inconsistent default answer dates.
+  if (answers_2018 .and. (default_answer_date >= 20190101)) default_answer_date = 20181231
+  if (.not.answers_2018 .and. (default_answer_date < 20190101)) default_answer_date = 20190101
+  call get_param(param_file, "MOM", "SURFACE_ANSWER_DATE", CS%answer_date, &
+               "The vintage of the expressions for the surface properties.  Values below "//&
+               "20190101 recover the answers from the end of 2018, while higher values "//&
+               "use updated and more robust forms of the same expressions.  "//&
+               "If both SURFACE_2018_ANSWERS and SURFACE_ANSWER_DATE are specified, the "//&
+               "latter takes precedence.", default=default_answer_date)
+
   call get_param(param_file, "MOM", "USE_DIABATIC_TIME_BUG", CS%use_diabatic_time_bug, &
                  "If true, uses the wrong calendar time for diabatic processes, as was "//&
                  "done in MOM6 versions prior to February 2018. This is not recommended.", &
@@ -2923,11 +2944,12 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
       endif
     else
       CS%tv%frazil(:,:) = 0.0
+      call set_initialized(CS%tv%frazil, "frazil", restart_CSp)
     endif
   endif
 
   if (CS%interp_p_surf) then
-    CS%p_surf_prev_set = query_initialized(CS%p_surf_prev,"p_surf_prev",restart_CSp)
+    CS%p_surf_prev_set = query_initialized(CS%p_surf_prev, "p_surf_prev", restart_CSp)
 
     if (CS%p_surf_prev_set) then
       ! Test whether the dimensional rescaling has changed for pressure.
@@ -2955,7 +2977,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
     endif
   endif
 
-  if (query_initialized(CS%ave_ssh_ibc,"ave_ssh",restart_CSp)) then
+  if (query_initialized(CS%ave_ssh_ibc, "ave_ssh", restart_CSp)) then
     if ((US%m_to_Z_restart /= 0.0) .and. (US%m_to_Z_restart /= 1.0) ) then
       Z_rescale = 1.0 / US%m_to_Z_restart
       do j=js,je ; do i=is,ie
@@ -2968,6 +2990,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
     else
       call find_eta(CS%h, CS%tv, G, GV, US, CS%ave_ssh_ibc, dZref=G%Z_ref)
     endif
+    call set_initialized(CS%ave_ssh_ibc, "ave_ssh", restart_CSp)
   endif
   if (CS%split) deallocate(eta)
 
@@ -3327,8 +3350,8 @@ subroutine extract_surface_state(CS, sfc_state_in)
 
   if (CS%Hmix < 0.0) then  ! A bulk mixed layer is in use, so layer 1 has the properties
     if (use_temperature) then ; do j=js,je ; do i=is,ie
-      sfc_state%SST(i,j) = US%C_to_degC*CS%tv%T(i,j,1)
-      sfc_state%SSS(i,j) = US%S_to_ppt*CS%tv%S(i,j,1)
+      sfc_state%SST(i,j) = CS%tv%T(i,j,1)
+      sfc_state%SSS(i,j) = CS%tv%S(i,j,1)
     enddo ; enddo ; endif
     do j=js,je ; do I=is-1,ie
       sfc_state%u(I,j) = CS%u(I,j,1)
@@ -3338,9 +3361,9 @@ subroutine extract_surface_state(CS, sfc_state_in)
     enddo ; enddo
 
   else  ! (CS%Hmix >= 0.0)
-    H_rescale = 1.0 ; if (CS%answers_2018) H_rescale = GV%H_to_Z
+    H_rescale = 1.0 ; if (CS%answer_date < 20190101) H_rescale = GV%H_to_Z
     depth_ml = CS%Hmix
-    if (.not.CS%answers_2018) depth_ml = CS%Hmix*GV%Z_to_H
+    if (CS%answer_date >= 20190101) depth_ml = CS%Hmix*GV%Z_to_H
     ! Determine the mean tracer properties of the uppermost depth_ml fluid.
 
     !$OMP parallel do default(shared) private(depth,dh)
@@ -3363,8 +3386,8 @@ subroutine extract_surface_state(CS, sfc_state_in)
           dh = 0.0
         endif
         if (use_temperature) then
-          sfc_state%SST(i,j) = sfc_state%SST(i,j) + dh * US%C_to_degC*CS%tv%T(i,j,k)
-          sfc_state%SSS(i,j) = sfc_state%SSS(i,j) + dh * US%S_to_ppt*CS%tv%S(i,j,k)
+          sfc_state%SST(i,j) = sfc_state%SST(i,j) + dh * CS%tv%T(i,j,k)
+          sfc_state%SSS(i,j) = sfc_state%SSS(i,j) + dh * CS%tv%S(i,j,k)
         else
           sfc_state%sfc_density(i,j) = sfc_state%sfc_density(i,j) + dh * GV%Rlay(k)
         endif
@@ -3372,7 +3395,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
       enddo ; enddo
   ! Calculate the average properties of the mixed layer depth.
       do i=is,ie
-        if (CS%answers_2018) then
+        if (CS%answer_date < 20190101) then
           if (depth(i) < GV%H_subroundoff*H_rescale) &
               depth(i) = GV%H_subroundoff*H_rescale
           if (use_temperature) then
@@ -3386,8 +3409,8 @@ subroutine extract_surface_state(CS, sfc_state_in)
             I_depth = 1.0 / (GV%H_subroundoff*H_rescale)
             missing_depth = GV%H_subroundoff*H_rescale - depth(i)
             if (use_temperature) then
-              sfc_state%SST(i,j) = (sfc_state%SST(i,j) + missing_depth*US%C_to_degC*CS%tv%T(i,j,1)) * I_depth
-              sfc_state%SSS(i,j) = (sfc_state%SSS(i,j) + missing_depth*US%S_to_ppt*CS%tv%S(i,j,1)) * I_depth
+              sfc_state%SST(i,j) = (sfc_state%SST(i,j) + missing_depth*CS%tv%T(i,j,1)) * I_depth
+              sfc_state%SSS(i,j) = (sfc_state%SSS(i,j) + missing_depth*CS%tv%S(i,j,1)) * I_depth
             else
               sfc_state%sfc_density(i,j) = (sfc_state%sfc_density(i,j) + &
                                             missing_depth*GV%Rlay(1)) * I_depth
@@ -3411,7 +3434,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
     !       This assumes that u and v halos have already been updated.
     if (CS%Hmix_UV>0.) then
       depth_ml = CS%Hmix_UV
-      if (.not.CS%answers_2018) depth_ml = CS%Hmix_UV*GV%Z_to_H
+      if (CS%answer_date >= 20190101) depth_ml = CS%Hmix_UV*GV%Z_to_H
       !$OMP parallel do default(shared) private(depth,dh,hv)
       do J=js-1,ie
         do i=is,ie
@@ -3539,8 +3562,8 @@ subroutine extract_surface_state(CS, sfc_state_in)
     do j=js,je ; do k=1,nz ; do i=is,ie
       mass = GV%H_to_RZ*h(i,j,k)
       sfc_state%ocean_mass(i,j) = sfc_state%ocean_mass(i,j) + mass
-      sfc_state%ocean_heat(i,j) = sfc_state%ocean_heat(i,j) + mass * US%C_to_degC*CS%tv%T(i,j,k)
-      sfc_state%ocean_salt(i,j) = sfc_state%ocean_salt(i,j) + mass * (1.0e-3*US%S_to_ppt*CS%tv%S(i,j,k))
+      sfc_state%ocean_heat(i,j) = sfc_state%ocean_heat(i,j) + mass * CS%tv%T(i,j,k)
+      sfc_state%ocean_salt(i,j) = sfc_state%ocean_salt(i,j) + mass * (1.0e-3*CS%tv%S(i,j,k))
     enddo ; enddo ; enddo
   else
     if (allocated(sfc_state%ocean_mass)) then
@@ -3557,7 +3580,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
       !$OMP parallel do default(shared) private(mass)
       do j=js,je ; do k=1,nz ; do i=is,ie
         mass = GV%H_to_RZ*h(i,j,k)
-        sfc_state%ocean_heat(i,j) = sfc_state%ocean_heat(i,j) + mass*US%C_to_degC*CS%tv%T(i,j,k)
+        sfc_state%ocean_heat(i,j) = sfc_state%ocean_heat(i,j) + mass * CS%tv%T(i,j,k)
       enddo ; enddo ; enddo
     endif
     if (allocated(sfc_state%ocean_salt)) then
@@ -3566,13 +3589,13 @@ subroutine extract_surface_state(CS, sfc_state_in)
       !$OMP parallel do default(shared) private(mass)
       do j=js,je ; do k=1,nz ; do i=is,ie
         mass = GV%H_to_RZ*h(i,j,k)
-        sfc_state%ocean_salt(i,j) = sfc_state%ocean_salt(i,j) + mass * (1.0e-3*US%S_to_ppt*CS%tv%S(i,j,k))
+        sfc_state%ocean_salt(i,j) = sfc_state%ocean_salt(i,j) + mass * (1.0e-3*CS%tv%S(i,j,k))
       enddo ; enddo ; enddo
     endif
   endif
 
   if (associated(CS%tracer_flow_CSp)) then
-    call call_tracer_surface_state(sfc_state, h, G, GV, CS%tracer_flow_CSp)
+    call call_tracer_surface_state(sfc_state, h, G, GV, US, CS%tracer_flow_CSp)
   endif
 
   if (CS%check_bad_sfc_vals) then
@@ -3599,7 +3622,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
                 'lon=',G%geoLonT(i,j), 'lat=',G%geoLatT(i,j), &
                 'x=',G%gridLonT(ig), 'y=',G%gridLatT(jg), &
                 'D=',US%Z_to_m*(G%bathyT(i,j)+G%Z_ref), 'SSH=',US%Z_to_m*sfc_state%sea_lev(i,j), &
-                'SST=',sfc_state%SST(i,j), 'SSS=',sfc_state%SSS(i,j), &
+                'SST=',US%C_to_degC*sfc_state%SST(i,j), 'SSS=',US%S_to_ppt*sfc_state%SSS(i,j), &
                 'U-=',US%L_T_to_m_s*sfc_state%u(I-1,j), 'U+=',US%L_T_to_m_s*sfc_state%u(I,j), &
                 'V-=',US%L_T_to_m_s*sfc_state%v(i,J-1), 'V+=',US%L_T_to_m_s*sfc_state%v(i,J)
             else
@@ -3690,14 +3713,14 @@ subroutine get_MOM_state_elements(CS, G, GV, US, C_p, C_p_scaled, use_temp)
   type(unit_scale_type),   optional, pointer     :: US   !< A dimensional unit scaling type
   real,                    optional, intent(out) :: C_p  !< The heat capacity [J kg degC-1]
   real,                    optional, intent(out) :: C_p_scaled !< The heat capacity in scaled
-                                                         !! units [Q degC-1 ~> J kg-1 degC-1]
+                                                         !! units [Q C-1 ~> J kg-1 degC-1]
   logical,                 optional, intent(out) :: use_temp !< True if temperature is a state variable
 
   if (present(G)) G => CS%G_in
   if (present(GV)) GV => CS%GV
   if (present(US)) US => CS%US
   if (present(C_p)) C_p = CS%US%Q_to_J_kg*US%degC_to_C * CS%tv%C_p
-  if (present(C_p_scaled)) C_p_scaled = US%degC_to_C*CS%tv%C_p
+  if (present(C_p_scaled)) C_p_scaled = CS%tv%C_p
   if (present(use_temp)) use_temp = associated(CS%tv%T)
 end subroutine get_MOM_state_elements
 
