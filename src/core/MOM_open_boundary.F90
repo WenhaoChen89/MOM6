@@ -5085,7 +5085,7 @@ subroutine update_segment_tracer_reservoirs(G, GV, uhr, vhr, h, OBC, dt, Reg)
                           ! 1 if the length scale of reservoir is zero [nodim]
   real :: a_in, a_out     ! The 0 and 1(-1) switch for reservoir source weights
                           ! e.g. a_in is -1 only if b_in ==1 and uhr or vhr is inward
-                          ! e.g. a_out is 1 only if b_out==1 and uhr or vhr is outward 
+                          ! e.g. a_out is 1 only if b_out==1 and uhr or vhr is outward
                           ! It's clear that a_in and a_out cannot be both non-zero [nodim]
 
   nz = GV%ke
