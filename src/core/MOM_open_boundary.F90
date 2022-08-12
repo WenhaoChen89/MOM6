@@ -5081,11 +5081,12 @@ subroutine update_segment_tracer_reservoirs(G, GV, uhr, vhr, h, OBC, dt, Reg)
                           ! For salinity the units would be [ppt S-1 ~> 1]
   integer :: i, j, k, m, n, ntr, nz
   integer :: ishift, idir, jshift, jdir
-  real :: b_in, b_out     ! The 0 or 1 switch for tracer reservoirs
+  real :: b_in, b_out     ! The 0 and 1 switch for tracer reservoirs
                           ! 1 if the length scale of reservoir is zero [nodim]
-  real :: a_in, a_out     ! The 0 or 1 switch only used if b is not zero
-                          ! e.g. a_in  is 1 only if b_in ==1 and uhr/vhr is inward
-                          ! e.g. a_out is 1 only if b_out==1 and uhr/vhr is outward [nodim]
+  real :: a_in, a_out     ! The 0 and 1(-1) switch for reservoir source weights
+                          ! e.g. a_in is -1 only if b_in ==1 and uhr or vhr is inward
+                          ! e.g. a_out is 1 only if b_out==1 and uhr or vhr is outward 
+                          ! It's clear that a_in and a_out cannot be both non-zero [nodim]
 
   nz = GV%ke
   ntr = Reg%ntr
@@ -5113,8 +5114,8 @@ subroutine update_segment_tracer_reservoirs(G, GV, uhr, vhr, h, OBC, dt, Reg)
           if (allocated(segment%tr_Reg%Tr(m)%tres)) then ; do k=1,nz
             ! Calculate weights. Both a and u_L are nodim. Adding them together has no meaning.
             ! However, since they cannot be both non-zero, adding them works like a switch.
-            ! When InvLscale_out is 0 and outflow, only Tint is applied to reservoirs
-            ! When InvLscale_in is 0 and inflow, only Tdata is applied to reservoirs
+            ! When InvLscale_out is 0 and outflow, only interior data is applied to reservoirs
+            ! When InvLscale_in is 0 and inflow, only nudged data is applied to reservoirs
             a_out = b_out * max(0.0, sign(1.0, idir*uhr(I,j,k)))
             a_in  = b_in  * min(0.0, sign(1.0, idir*uhr(I,j,k)))
             u_L_out = max(0.0, (idir*uhr(I,j,k))*segment%Tr_InvLscale_out / &
