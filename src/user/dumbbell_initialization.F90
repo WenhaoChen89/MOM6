@@ -447,7 +447,7 @@ subroutine dumbbell_initialize_sponges(G, GV, US, tv, h_in, depth_tot, param_fil
       endif
     enddo ; enddo
   if (associated(tv%S)) call set_up_ALE_sponge_field(S, G, GV, tv%S, ACSp, 'salt', &
-                          sp_long_name='salinity', sp_unit = 'g kg-1 s-1')
+                          sp_long_name='salinity', sp_unit='g kg-1 s-1')
  else
     do j=G%jsc,G%jec ; do i=G%isc,G%iec
       eta(i,j,1) = 0.0
