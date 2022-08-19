@@ -2135,7 +2135,7 @@ subroutine initialize_sponges_file(G, GV, US, use_temperature, tv, u, v, depth_t
       if (use_temperature) then
         allocate(tmp_tr(isd:ied,jsd:jed,nz_data))
         call MOM_read_data(filename, potemp_var, tmp_tr(:,:,:), G%Domain, scale=US%degC_to_C)
-        call set_up_ALE_sponge_field(tmp_tr, G, GV, tv%S, ALE_CSp, 'temp', &
+        call set_up_ALE_sponge_field(tmp_tr, G, GV, tv%T, ALE_CSp, 'temp', &
                sp_long_name='temperature', sp_unit='degC s-1')
         call MOM_read_data(filename, salin_var, tmp_tr(:,:,:), G%Domain, scale=US%ppt_to_S)
         call set_up_ALE_sponge_field(tmp_tr, G, GV, tv%S, ALE_CSp, 'salt', &

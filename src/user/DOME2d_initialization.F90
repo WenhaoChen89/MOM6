@@ -473,7 +473,7 @@ subroutine DOME2d_initialize_sponges(G, GV, US, tv, depth_tot, param_file, use_A
       enddo
     enddo ; enddo
 
-    if ( associated(tv%T) ) call set_up_ALE_sponge_field(T, G, GV, tv%S, ACSp, 'temp', &
+    if ( associated(tv%T) ) call set_up_ALE_sponge_field(T, G, GV, tv%T, ACSp, 'temp', &
         sp_long_name='temperature', sp_unit='degC s-1')
     if ( associated(tv%S) ) call set_up_ALE_sponge_field(S, G, GV, tv%S, ACSp, 'salt', &
         sp_long_name='salinity', sp_unit='g kg-1 s-1')

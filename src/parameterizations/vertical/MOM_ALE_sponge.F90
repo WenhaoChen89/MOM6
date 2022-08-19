@@ -81,9 +81,9 @@ type :: p2d
   real :: scale = 1.0  !< A multiplicative factor by which to rescale input data
   real, dimension(:,:), pointer :: p => NULL() !< pointer the data.
   real, dimension(:,:), pointer :: h => NULL() !< pointer the data grid.
-  Character (:), allocatable  :: name  !< The name of the input field
-  Character (:), allocatable  :: long_name !< The long name of the input field
-  Character (:), allocatable  :: unit !< The unit of the input field
+  Character(:), allocatable  :: name  !< The name of the input field
+  Character(:), allocatable  :: long_name !< The long name of the input field
+  Character(:), allocatable  :: unit !< The unit of the input field
 end type p2d
 
 !> ALE sponge control structure
@@ -137,7 +137,7 @@ type, public :: ALE_sponge_CS ; private
   logical :: tripolar_N !< grid is folded at its north edge
 
   !>@{ Diagnostic IDs
-  integer, dimension(MAX_FIELDS_) :: id_sp_tendency      !< Diagnostic ids for temperature and salinity
+  integer, dimension(MAX_FIELDS_) :: id_sp_tendency      !< Diagnostic ids for tracers
                                                !! tendency due to sponges
   integer :: id_sp_u_tendency                  !< Diagnostic id for zonal momentum tendency due to
                                                !! Rayleigh damping
