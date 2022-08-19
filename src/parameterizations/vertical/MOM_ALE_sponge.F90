@@ -81,9 +81,9 @@ type :: p2d
   real :: scale = 1.0  !< A multiplicative factor by which to rescale input data
   real, dimension(:,:), pointer :: p => NULL() !< pointer the data.
   real, dimension(:,:), pointer :: h => NULL() !< pointer the data grid.
-  Character(:), allocatable  :: name  !< The name of the input field
-  Character(:), allocatable  :: long_name !< The long name of the input field
-  Character(:), allocatable  :: unit !< The unit of the input field
+  character(len=:), allocatable  :: name  !< The name of the input field
+  character(len=:), allocatable  :: long_name !< The long name of the input field
+  character(len=:), allocatable  :: unit !< The unit of the input field
 end type p2d
 
 !> ALE sponge control structure
