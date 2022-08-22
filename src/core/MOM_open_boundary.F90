@@ -5094,8 +5094,8 @@ subroutine update_segment_tracer_reservoirs(G, GV, uhr, vhr, h, OBC, dt, Reg)
   if (associated(OBC)) then ; if (OBC%OBC_pe) then ; do n=1,OBC%number_of_segments
     segment=>OBC%segment(n)
     if (.not. associated(segment%tr_Reg)) cycle
-    b_in  = 0; if (segment%Tr_InvLscale_in  == 0) b_in  = 1
-    b_out = 0; if (segment%Tr_InvLscale_out == 0) b_out = 1
+    b_in  = 0.0; if (segment%Tr_InvLscale_in  == 0.0) b_in  = 1.0
+    b_out = 0.0; if (segment%Tr_InvLscale_out == 0.0) b_out = 1.0
     if (segment%is_E_or_W) then
       I = segment%HI%IsdB
       do j=segment%HI%jsd,segment%HI%jed
