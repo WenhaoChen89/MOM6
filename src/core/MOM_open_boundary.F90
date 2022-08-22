@@ -5122,7 +5122,7 @@ subroutine update_segment_tracer_reservoirs(G, GV, uhr, vhr, h, OBC, dt, Reg)
                       ((h(i+ishift,j,k) + GV%H_subroundoff)*G%dyCu(I,j)))
             u_L_in  = min(0.0, (idir*uhr(I,j,k))*segment%Tr_InvLscale_in  / &
                       ((h(i+ishift,j,k) + GV%H_subroundoff)*G%dyCu(I,j)))
-            fac1 = (1.0-a_out+a_in) + (u_L_out+a_out) - (u_L_in+a_in)
+            fac1 = (1.0 - (a_out - a_in)) + ((u_L_out + a_out) - (u_L_in + a_in))
             segment%tr_Reg%Tr(m)%tres(I,j,k) = (1.0/fac1) * &
                               ((1.0-a_out+a_in)*segment%tr_Reg%Tr(m)%tres(I,j,k)+ &
                               ((u_L_out+a_out)*Reg%Tr(m)%t(I+ishift,j,k) - &
@@ -5147,14 +5147,14 @@ subroutine update_segment_tracer_reservoirs(G, GV, uhr, vhr, h, OBC, dt, Reg)
         do m=1,ntr
           I_scale = 1.0 ; if (segment%tr_Reg%Tr(m)%scale /= 0.0) I_scale = 1.0 / segment%tr_Reg%Tr(m)%scale
           if (allocated(segment%tr_Reg%Tr(m)%tres)) then ; do k=1,nz
-            a_out = b_out * max(0.0, sign(1.0, jdir*vhr(I,j,k)))
-            a_in  = b_in  * min(0.0, sign(1.0, jdir*vhr(I,j,k)))
+            a_out = b_out * max(0.0, sign(1.0, jdir*vhr(i,J,k)))
+            a_in  = b_in  * min(0.0, sign(1.0, jdir*vhr(i,J,k)))
             v_L_out = max(0.0, (jdir*vhr(i,J,k))*segment%Tr_InvLscale_out / &
                       ((h(i,j+jshift,k) + GV%H_subroundoff)*G%dxCv(i,J)))
             v_L_in  = min(0.0, (jdir*vhr(i,J,k))*segment%Tr_InvLscale_in  / &
                       ((h(i,j+jshift,k) + GV%H_subroundoff)*G%dxCv(i,J)))
             fac1 = 1.0 + (v_L_out-v_L_in)
-            fac1 = (1.0-a_out+a_in) + (v_L_out+a_out) - (v_L_in+a_in)
+            fac1 = (1.0 - (a_out - a_in)) + ((v_L_out + a_out) - (v_L_in + a_in))
             segment%tr_Reg%Tr(m)%tres(i,J,k) = (1.0/fac1) * &
                               ((1.0-a_out+a_in)*segment%tr_Reg%Tr(m)%tres(i,J,k) + &
                               ((v_L_out+a_out)*Reg%Tr(m)%t(i,J+jshift,k) - &
