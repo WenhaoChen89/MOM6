@@ -103,6 +103,8 @@ use MOM_open_boundary,         only : register_temp_salt_segments
 use MOM_open_boundary,         only : open_boundary_register_restarts
 use MOM_open_boundary,         only : update_segment_tracer_reservoirs
 use MOM_open_boundary,         only : rotate_OBC_config, rotate_OBC_init
+use MOM_porous_barriers,       only : porous_widths_layer, porous_widths_interface, porous_barriers_init
+use MOM_porous_barriers,       only : porous_barrier_CS
 use MOM_set_visc,              only : set_viscous_BBL, set_viscous_ML
 use MOM_set_visc,              only : set_visc_register_restarts, set_visc_CS
 use MOM_set_visc,              only : set_visc_init, set_visc_end
@@ -132,7 +134,7 @@ use MOM_transcribe_grid,       only : copy_dyngrid_to_MOM_grid, copy_MOM_grid_to
 use MOM_unit_scaling,          only : unit_scale_type, unit_scaling_init
 use MOM_unit_scaling,          only : unit_scaling_end, fix_restart_unit_scaling
 use MOM_variables,             only : surface, allocate_surface_state, deallocate_surface_state
-use MOM_variables,             only : thermo_var_ptrs, vertvisc_type, porous_barrier_ptrs
+use MOM_variables,             only : thermo_var_ptrs, vertvisc_type, porous_barrier_type
 use MOM_variables,             only : accel_diag_ptrs, cont_diag_ptrs, ocean_internal_state
 use MOM_variables,             only : rotate_surface_state
 use MOM_verticalGrid,          only : verticalGrid_type, verticalGridInit, verticalGridEnd
@@ -140,8 +142,6 @@ use MOM_verticalGrid,          only : fix_restart_scaling
 use MOM_verticalGrid,          only : get_thickness_units, get_flux_units, get_tr_flux_units
 use MOM_wave_interface,        only : wave_parameters_CS, waves_end, waves_register_restarts
 use MOM_wave_interface,        only : Update_Stokes_Drift
-
-use MOM_porous_barriers,      only : porous_widths
 
 ! Database client used for machine-learning interface
 use MOM_database_comms,       only : dbcomms_CS_type, database_comms_init, dbclient_type
@@ -403,6 +403,8 @@ type, public :: MOM_control_struct ; private
     !< Pointer to the MOM diagnostics control structure
   type(offline_transport_CS),    pointer :: offline_CSp => NULL()
     !< Pointer to the offline tracer transport control structure
+  type(porous_barrier_CS)                :: por_bar_CS
+    !< Control structure for porous barrier
 
   logical               :: ensemble_ocean !< if true, this run is part of a
                                 !! larger ensemble for the purpose of data assimilation
@@ -411,13 +413,9 @@ type, public :: MOM_control_struct ; private
                                 !! ensemble model state vectors and data assimilation
                                 !! increments and priors
   type(dbcomms_CS_type)   :: dbcomms_CS !< Control structure for database client used for online ML/AI
-  type(porous_barrier_ptrs) :: pbv !< porous barrier fractional cell metrics
-  real ALLOCABLE_, dimension(NIMEMB_PTR_,NJMEM_,NKMEM_) :: por_face_areaU !< fractional open area of U-faces [nondim]
-  real ALLOCABLE_, dimension(NIMEM_,NJMEMB_PTR_,NKMEM_) :: por_face_areaV !< fractional open area of V-faces [nondim]
-  real ALLOCABLE_, dimension(NIMEMB_PTR_,NJMEM_,NK_INTERFACE_) :: por_layer_widthU !< fractional open width
-                                                                                   !! of U-faces [nondim]
-  real ALLOCABLE_, dimension(NIMEM_,NJMEMB_PTR_,NK_INTERFACE_) :: por_layer_widthV !< fractional open width
-                                                                                   !! of V-faces [nondim]
+  logical :: use_porbar !< If true, use porous barrier to constrain the widths and face areas
+                        !! at the edges of the grid cells.
+  type(porous_barrier_type) :: pbv !< porous barrier fractional cell metrics
   type(particles), pointer :: particles => NULL() !<Lagrangian particles
   type(stochastic_CS), pointer :: stoch_CS => NULL() !< a pointer to the stochastics control structure
 end type MOM_control_struct
@@ -1056,8 +1054,6 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_thermo, &
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB
 
-  real, dimension(SZI_(CS%G),SZJ_(CS%G),SZK_(CS%G)+1) :: eta_por ! layer interface heights
-                                                    !! for porous topo. [Z ~> m or 1/eta_to_m]
   G => CS%G ; GV => CS%GV ; US => CS%US ; IDs => CS%IDs
   is   = G%isc  ; ie   = G%iec  ; js   = G%jsc  ; je   = G%jec ; nz = GV%ke
   Isq  = G%IscB ; Ieq  = G%IecB ; Jsq  = G%JscB ; Jeq  = G%JecB
@@ -1095,8 +1091,14 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_thermo, &
     call diag_update_remap_grids(CS%diag)
   endif
 
-  !update porous barrier fractional cell metrics
-  call porous_widths(h, CS%tv, G, GV, US, eta_por, CS%pbv)
+  ! Update porous barrier fractional cell metrics
+  if (CS%use_porbar) then
+    call enable_averages(dt, Time_local, CS%diag)
+    call porous_widths_layer(h, CS%tv, G, GV, US, CS%pbv, CS%por_bar_CS)
+    call disable_averaging(CS%diag)
+    call pass_vector(CS%pbv%por_face_areaU, CS%pbv%por_face_areaV, &
+                     G%Domain, direction=To_All+SCALAR_PAIR, clock=id_clock_pass, halo=CS%cont_stencil)
+  endif
 
   ! The bottom boundary layer properties need to be recalculated.
   if (bbl_time_int > 0.0) then
@@ -1384,9 +1386,6 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
   integer :: halo_sz ! The size of a halo where data must be valid.
   integer :: is, ie, js, je, nz
 
-  real, dimension(SZI_(CS%G),SZJ_(CS%G),SZK_(CS%G)+1) :: eta_por ! layer interface heights
-                                                    !! for porous topo. [Z ~> m or 1/eta_to_m]
-
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   showCallTree = callTree_showQuery()
   if (showCallTree) call callTree_enter("step_MOM_thermo(), MOM.F90")
@@ -1423,7 +1422,11 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
     ! and set_viscous_BBL is called as a part of the dynamic stepping.
     call cpu_clock_begin(id_clock_BBL_visc)
     !update porous barrier fractional cell metrics
-    call porous_widths(h, CS%tv, G, GV, US, eta_por, CS%pbv)
+    if (CS%use_porbar) then
+      call porous_widths_interface(h, CS%tv, G, GV, US, CS%pbv, CS%por_bar_CS)
+      call pass_vector(CS%pbv%por_layer_widthU, CS%pbv%por_layer_widthV, &
+                      G%Domain, direction=To_ALL+SCALAR_PAIR, clock=id_clock_pass, halo=CS%cont_stencil)
+    endif
     call set_viscous_BBL(u, v, h, tv, CS%visc, G, GV, US, CS%set_visc_CSp, CS%pbv)
     call cpu_clock_end(id_clock_BBL_visc)
     if (showCallTree) call callTree_wayPoint("done with set_viscous_BBL (step_MOM_thermo)")
@@ -1998,6 +2001,10 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                  "This is only used if THICKNESSDIFFUSE is true.", &
                  default=.false.)
   if (.not.CS%thickness_diffuse) CS%thickness_diffuse_first = .false.
+  call get_param(param_file, "MOM", "USE_POROUS_BARRIER", CS%use_porbar, &
+                 "If true, use porous barrier to constrain the widths "//&
+                 "and face areas at the edges of the grid cells. ", &
+                 default=.true.) ! The default should be false after tests.
   call get_param(param_file, "MOM", "BATHYMETRY_AT_VEL", bathy_at_vel, &
                  "If true, there are separate values for the basin depths "//&
                  "at velocity points.  Otherwise the effects of topography "//&
@@ -2478,12 +2485,11 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   CS%time_in_cycle = 0.0 ; CS%time_in_thermo_cycle = 0.0
 
   !allocate porous topography variables
-  ALLOC_(CS%por_face_areaU(IsdB:IedB,jsd:jed,nz)) ; CS%por_face_areaU(:,:,:) = 1.0
-  ALLOC_(CS%por_face_areaV(isd:ied,JsdB:JedB,nz)) ; CS%por_face_areaV(:,:,:) = 1.0
-  ALLOC_(CS%por_layer_widthU(IsdB:IedB,jsd:jed,nz+1)) ; CS%por_layer_widthU(:,:,:) = 1.0
-  ALLOC_(CS%por_layer_widthV(isd:ied,JsdB:JedB,nz+1)) ; CS%por_layer_widthV(:,:,:) = 1.0
-  CS%pbv%por_face_areaU => CS%por_face_areaU; CS%pbv%por_face_areaV=> CS%por_face_areaV
-  CS%pbv%por_layer_widthU => CS%por_layer_widthU; CS%pbv%por_layer_widthV => CS%por_layer_widthV
+  allocate(CS%pbv%por_face_areaU(IsdB:IedB,jsd:jed,nz)) ; CS%pbv%por_face_areaU(:,:,:) = 1.0
+  allocate(CS%pbv%por_face_areaV(isd:ied,JsdB:JedB,nz)) ; CS%pbv%por_face_areaV(:,:,:) = 1.0
+  allocate(CS%pbv%por_layer_widthU(IsdB:IedB,jsd:jed,nz+1)) ; CS%pbv%por_layer_widthU(:,:,:) = 1.0
+  allocate(CS%pbv%por_layer_widthV(isd:ied,JsdB:JedB,nz+1)) ; CS%pbv%por_layer_widthV(:,:,:) = 1.0
+
   ! Use the Wright equation of state by default, unless otherwise specified
   ! Note: this line and the following block ought to be in a separate
   ! initialization routine for tv.
@@ -2822,6 +2828,10 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   new_sim = is_new_run(restart_CSp)
   call MOM_stoch_eos_init(G,Time,param_file,CS%stoch_eos_CS,restart_CSp,diag)
+
+  if (CS%use_porbar) &
+    call porous_barriers_init(Time, US, param_file, diag, CS%por_bar_CS)
+
   if (CS%split) then
     allocate(eta(SZI_(G),SZJ_(G)), source=0.0)
     call initialize_dyn_split_RK2(CS%u, CS%v, CS%h, CS%uh, CS%vh, eta, Time, &
@@ -3775,8 +3785,8 @@ subroutine MOM_end(CS)
   if (CS%use_ALE_algorithm) call ALE_end(CS%ALE_CSp)
 
   !deallocate porous topography variables
-  DEALLOC_(CS%por_face_areaU) ; DEALLOC_(CS%por_face_areaV)
-  DEALLOC_(CS%por_layer_widthU) ; DEALLOC_(CS%por_layer_widthV)
+  deallocate(CS%pbv%por_face_areaU) ; deallocate(CS%pbv%por_face_areaV)
+  deallocate(CS%pbv%por_layer_widthU) ; deallocate(CS%pbv%por_layer_widthV)
 
   ! NOTE: Allocated in PressureForce_FV_Bouss
   if (associated(CS%tv%varT)) deallocate(CS%tv%varT)
