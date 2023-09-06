@@ -152,28 +152,34 @@ subroutine open_param_file(filename, CS, checkable, component, doc_file_dir)
   ! Check that this file has not already been opened
   if (CS%nfiles > 0) then
     reopened_file = .false.
-    inquire(file=trim(filename), number=iounit)
-    if (iounit /= -1) then
-      do i = 1, CS%nfiles
-        if (CS%iounit(i) == iounit) then
-          call assert(trim(CS%filename(1)) == trim(filename), &
-              "open_param_file: internal inconsistency! "//trim(filename)// &
-              " is registered as open but has the wrong unit number!")
-          call MOM_error(WARNING, &
-              "open_param_file: file "//trim(filename)// &
-              " has already been opened. This should NOT happen!"// &
-              " Did you specify the same file twice in a namelist?")
-          reopened_file = .true.
-        endif ! unit numbers
-      enddo ! i
+
+    if (is_root_pe()) then
+      inquire(file=trim(filename), number=iounit)
+      if (iounit /= -1) then
+        do i = 1, CS%nfiles
+          if (CS%iounit(i) == iounit) then
+            call assert(trim(CS%filename(1)) == trim(filename), &
+                "open_param_file: internal inconsistency! "//trim(filename)// &
+                " is registered as open but has the wrong unit number!")
+            call MOM_error(WARNING, &
+                "open_param_file: file "//trim(filename)// &
+                " has already been opened. This should NOT happen!"// &
+                " Did you specify the same file twice in a namelist?")
+            reopened_file = .true.
+          endif ! unit numbers
+        enddo ! i
+      endif
     endif
+
     if (any_across_PEs(reopened_file)) return
   endif
 
   ! Check that the file exists to readstdlog
-  inquire(file=trim(filename), exist=file_exists)
-  if (.not.file_exists) call MOM_error(FATAL, &
-      "open_param_file: Input file '"// trim(filename)//"' does not exist.")
+  if (is_root_pe()) then
+    inquire(file=trim(filename), exist=file_exists)
+    if (.not.file_exists) call MOM_error(FATAL, &
+        "open_param_file: Input file '"// trim(filename)//"' does not exist.")
+  endif
 
   Netcdf_file = .false.
   if (strlen > 3) then
@@ -1411,7 +1417,7 @@ end subroutine log_param_int_array
 
 !> Log the name and value of a real model parameter in documentation files.
 subroutine log_param_real(CS, modulename, varname, value, desc, units, &
-                          default, debuggingParam, like_default)
+                          default, debuggingParam, like_default, unscale)
   type(param_file_type),      intent(in) :: CS      !< The control structure for the file_parser module,
                                          !! it is also a structure to parse for run-time parameters
   character(len=*),           intent(in) :: modulename !< The name of the calling module
@@ -1419,32 +1425,37 @@ subroutine log_param_real(CS, modulename, varname, value, desc, units, &
   real,                       intent(in) :: value   !< The value of the parameter to log
   character(len=*), optional, intent(in) :: desc    !< A description of this variable; if not
                                          !! present, this parameter is not written to a doc file
-  character(len=*), optional, intent(in) :: units   !< The units of this parameter
+  character(len=*),           intent(in) :: units   !< The units of this parameter
   real,             optional, intent(in) :: default !< The default value of the parameter
   logical,          optional, intent(in) :: debuggingParam !< If present and true, this parameter is
                                          !! logged in the debugging parameter file
   logical,          optional, intent(in) :: like_default !< If present and true, log this parameter as
                                          !! though it has the default value, even if there is no default.
+  real,             optional, intent(in) :: unscale   !< A reciprocal scaling factor that the parameter is
+                                         !! multiplied by before it is logged
 
+  real :: log_val ! The parameter value that is written out
   character(len=240) :: mesg, myunits
 
+  log_val = value ; if (present(unscale)) log_val = unscale * value
+
   write(mesg, '("  ",a," ",a,": ",a)') &
-    trim(modulename), trim(varname), trim(left_real(value))
+    trim(modulename), trim(varname), trim(left_real(log_val))
   if (is_root_pe()) then
     if (CS%log_open) write(CS%stdlog,'(a)') trim(mesg)
     if (CS%log_to_stdout) write(CS%stdout,'(a)') trim(mesg)
   endif
 
-  myunits="not defined"; if (present(units)) write(myunits(1:240),'(A)') trim(units)
+  write(myunits(1:240),'(A)') trim(units)
   if (present(desc)) &
-    call doc_param(CS%doc, varname, desc, myunits, value, default, &
+    call doc_param(CS%doc, varname, desc, myunits, log_val, default, &
                    debuggingParam=debuggingParam, like_default=like_default)
 
 end subroutine log_param_real
 
 !> Log the name and values of an array of real model parameter in documentation files.
 subroutine log_param_real_array(CS, modulename, varname, value, desc, &
-                                units, default, debuggingParam, like_default)
+                                units, default, debuggingParam, like_default, unscale)
   type(param_file_type),      intent(in) :: CS      !< The control structure for the file_parser module,
                                          !! it is also a structure to parse for run-time parameters
   character(len=*),           intent(in) :: modulename !< The name of the calling module
@@ -1452,28 +1463,33 @@ subroutine log_param_real_array(CS, modulename, varname, value, desc, &
   real, dimension(:),         intent(in) :: value   !< The value of the parameter to log
   character(len=*), optional, intent(in) :: desc    !< A description of this variable; if not
                                              !! present, this parameter is not written to a doc file
-  character(len=*), optional, intent(in) :: units   !< The units of this parameter
+  character(len=*),           intent(in) :: units   !< The units of this parameter
   real,             optional, intent(in) :: default !< The default value of the parameter
   logical,          optional, intent(in) :: debuggingParam !< If present and true, this parameter is
                                          !! logged in the debugging parameter file
   logical,          optional, intent(in) :: like_default !< If present and true, log this parameter as
                                          !! though it has the default value, even if there is no default.
+  real,             optional, intent(in) :: unscale   !< A reciprocal scaling factor that the parameter is
+                                         !! multiplied by before it is logged
 
+  real, dimension(size(value)) :: log_val ! The array of parameter values that is written out
   character(len=:), allocatable :: mesg
   character(len=240) :: myunits
+
+  log_val(:) = value(:) ; if (present(unscale)) log_val(:) = unscale * value(:)
 
  !write(mesg, '("  ",a," ",a,": ",ES19.12,99(",",ES19.12))') &
  !write(mesg, '("  ",a," ",a,": ",G,99(",",G))') &
  !  trim(modulename), trim(varname), value
-  mesg = "  " // trim(modulename) // " " // trim(varname) // ": " // trim(left_reals(value))
+  mesg = "  " // trim(modulename) // " " // trim(varname) // ": " // trim(left_reals(log_val))
   if (is_root_pe()) then
     if (CS%log_open) write(CS%stdlog,'(a)') trim(mesg)
     if (CS%log_to_stdout) write(CS%stdout,'(a)') trim(mesg)
   endif
 
-  myunits="not defined"; if (present(units)) write(myunits(1:240),'(A)') trim(units)
+  write(myunits(1:240),'(A)') trim(units)
   if (present(desc)) &
-    call doc_param(CS%doc, varname, desc, myunits, value, default, &
+    call doc_param(CS%doc, varname, desc, myunits, log_val, default, &
                    debuggingParam=debuggingParam, like_default=like_default)
 
 end subroutine log_param_real_array
@@ -1772,7 +1788,7 @@ subroutine get_param_real(CS, modulename, varname, value, desc, units, &
                                          !! read from the parameter file and logged
   character(len=*), optional, intent(in)    :: desc    !< A description of this variable; if not
                                          !! present, this parameter is not written to a doc file
-  character(len=*), optional, intent(in)    :: units   !< The units of this parameter
+  character(len=*),           intent(in)    :: units   !< The units of this parameter
   real,             optional, intent(in)    :: default !< The default value of the parameter
   logical,          optional, intent(in)    :: fail_if_missing !< If present and true, a fatal error occurs
                                          !! if this variable is not found in the parameter file
@@ -1820,7 +1836,7 @@ subroutine get_param_real_array(CS, modulename, varname, value, desc, units, &
                                          !! read from the parameter file and logged
   character(len=*), optional, intent(in)    :: desc    !< A description of this variable; if not
                                          !! present, this parameter is not written to a doc file
-  character(len=*), optional, intent(in)    :: units   !< The units of this parameter
+  character(len=*),           intent(in)    :: units   !< The units of this parameter
   real,             optional, intent(in)    :: default !< The default value of the parameter
   logical,          optional, intent(in)    :: fail_if_missing !< If present and true, a fatal error occurs
                                          !! if this variable is not found in the parameter file

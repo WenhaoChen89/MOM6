@@ -1,4 +1,4 @@
-!> Simulates CFCs using atmospheric pressure, wind speed and sea ice cover
+  !> Simulates CFCs using atmospheric pressure, wind speed and sea ice cover
 !! provided via cap (only NUOPC cap is implemented so far).
 module MOM_CFC_cap
 
@@ -19,7 +19,8 @@ use MOM_open_boundary,   only : ocean_OBC_type
 use MOM_restart,         only : query_initialized, set_initialized, MOM_restart_CS
 use MOM_spatial_means,   only : global_mass_int_EFP
 use MOM_time_manager,    only : time_type
-use time_interp_external_mod, only : init_external_field, time_interp_external
+use MOM_interpolate,     only : time_interp_external
+use MOM_interpolate,     only : external_field
 use MOM_tracer_registry, only : register_tracer
 use MOM_tracer_types,    only : tracer_registry_type
 use MOM_tracer_diabatic, only : tracer_vertdiff, applyTracerBoundaryFluxesInOut
@@ -189,7 +190,7 @@ subroutine initialize_CFC_cap(restart, day, G, GV, US, h, diag, OBC, CS)
   type(ocean_OBC_type),           pointer    :: OBC        !< This open boundary condition type
                                                            !! specifies whether, where, and what
                                                            !! open boundary conditions are used.
-  type(CFC_cap_CS),              pointer    :: CS          !< The control structure returned by a
+  type(CFC_cap_CS),               pointer    :: CS         !< The control structure returned by a
                                                            !! previous call to register_CFC_cap.
 
   ! local variables
@@ -214,7 +215,7 @@ subroutine initialize_CFC_cap(restart, day, G, GV, US, h, diag, OBC, CS)
     ! CFC12 cmor conventions: http://clipc-services.ceda.ac.uk/dreq/u/3ab8e10027d7014f18f9391890369235.html
     write(m2char, "(I1)") m
     CS%CFC_data(m)%id_cmor = register_diag_field('ocean_model', 'cfc1'//m2char, diag%axesTL, day,   &
-      'Mole Concentration of CFC1'//m2char//' in Sea Water', 'mol m-3')
+      'Mole Concentration of CFC1'//m2char//' in Sea Water', 'mol m-3', conversion=GV%Rho0*US%R_to_kg_m3)
   enddo
 
 
@@ -307,7 +308,6 @@ subroutine CFC_cap_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, GV, US, C
 
   ! Local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: h_work ! Used so that h can be modified [H ~> m or kg m-2]
-  real :: flux_scale
   integer :: i, j, k, is, ie, js, je, nz
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -317,14 +317,12 @@ subroutine CFC_cap_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, GV, US, C
   ! Compute KPP nonlocal term if necessary
   if (present(KPP_CSp)) then
     if (associated(KPP_CSp) .and. present(nonLocalTrans)) then
-      flux_scale = GV%Z_to_H / GV%rho0
-
       call KPP_NonLocalTransport(KPP_CSp, G, GV, h_old, nonLocalTrans, fluxes%cfc11_flux(:,:), dt, CS%diag, &
                                 CS%CFC_data(1)%tr_ptr, CS%CFC_data(1)%conc(:,:,:), &
-                                flux_scale=flux_scale)
+                                flux_scale=GV%RZ_to_H)
       call KPP_NonLocalTransport(KPP_CSp, G, GV, h_old, nonLocalTrans, fluxes%cfc12_flux(:,:), dt, CS%diag, &
                                 CS%CFC_data(2)%tr_ptr, CS%CFC_data(2)%conc(:,:,:), &
-                                flux_scale=flux_scale)
+                                flux_scale=GV%RZ_to_H)
     endif
   endif
 
@@ -350,12 +348,8 @@ subroutine CFC_cap_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, GV, US, C
   endif
 
   ! If needed, write out any desired diagnostics from tracer sources & sinks here.
-  if (CS%CFC_data(1)%id_cmor > 0) call post_data(CS%CFC_data(1)%id_cmor, &
-                                                 (GV%Rho0*US%R_to_kg_m3)*CS%CFC_data(1)%conc, &
-                                                 CS%diag)
-  if (CS%CFC_data(2)%id_cmor > 0) call post_data(CS%CFC_data(2)%id_cmor, &
-                                                 (GV%Rho0*US%R_to_kg_m3)*CS%CFC_data(2)%conc, &
-                                                 CS%diag)
+  if (CS%CFC_data(1)%id_cmor > 0) call post_data(CS%CFC_data(1)%id_cmor, CS%CFC_data(1)%conc, CS%diag)
+  if (CS%CFC_data(2)%id_cmor > 0) call post_data(CS%CFC_data(2)%id_cmor, CS%CFC_data(2)%conc, CS%diag)
 
 end subroutine CFC_cap_column_physics
 
@@ -428,7 +422,8 @@ end subroutine CFC_cap_surface_state
 
 !> Orchestrates the calculation of the CFC fluxes [mol m-2 s-1], including getting the ATM
 !! concentration, and calculating the solubility, Schmidt number, and gas exchange.
-subroutine CFC_cap_fluxes(fluxes, sfc_state, G, US, Rho0, Time, id_cfc11_atm, id_cfc12_atm)
+subroutine CFC_cap_fluxes(fluxes, sfc_state, G, US, Rho0, Time, &
+    cfc11_atm_handle, cfc12_atm_handle)
   type(ocean_grid_type),        intent(in   ) :: G  !< The ocean's grid structure.
   type(unit_scale_type),        intent(in  )  :: US !< A dimensional unit scaling type
   type(surface),                intent(in   ) :: sfc_state !< A structure containing fields
@@ -439,8 +434,8 @@ subroutine CFC_cap_fluxes(fluxes, sfc_state, G, US, Rho0, Time, id_cfc11_atm, id
   real,                         intent(in   ) :: Rho0 !< The mean ocean density [R ~> kg m-3]
   type(time_type),              intent(in   ) :: Time !< The time of the fluxes, used for interpolating the
                                               !! CFC's concentration in the atmosphere.
-  integer,           optional,  intent(inout):: id_cfc11_atm !< id number for time_interp_external.
-  integer,           optional,  intent(inout):: id_cfc12_atm !< id number for time_interp_external.
+  type(external_field), optional, intent(inout) :: cfc11_atm_handle !< Handle for time-interpolated CFC11
+  type(external_field), optional, intent(inout) :: cfc12_atm_handle !< Handle for time-interpolated CFC12
 
   ! Local variables
   real, dimension(SZI_(G),SZJ_(G)) :: &
@@ -463,8 +458,8 @@ subroutine CFC_cap_fluxes(fluxes, sfc_state, G, US, Rho0, Time, id_cfc11_atm, id
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
 
   ! CFC11 ATM concentration
-  if (present(id_cfc11_atm) .and. (id_cfc11_atm /= -1)) then
-    call time_interp_external(id_cfc11_atm, Time, cfc11_atm)
+  if (present(cfc11_atm_handle)) then
+    call time_interp_external(cfc11_atm_handle, Time, cfc11_atm)
     ! convert from ppt (pico mol/mol) to mol/mol
     cfc11_atm = cfc11_atm * 1.0e-12
   else
@@ -474,8 +469,8 @@ subroutine CFC_cap_fluxes(fluxes, sfc_state, G, US, Rho0, Time, id_cfc11_atm, id
   endif
 
   ! CFC12 ATM concentration
-  if (present(id_cfc12_atm) .and. (id_cfc12_atm /= -1)) then
-    call time_interp_external(id_cfc12_atm, Time, cfc12_atm)
+  if (present(cfc12_atm_handle)) then
+    call time_interp_external(cfc12_atm_handle, Time, cfc12_atm)
     ! convert from ppt (pico mol/mol) to mol/mol
     cfc12_atm = cfc12_atm * 1.0e-12
   else

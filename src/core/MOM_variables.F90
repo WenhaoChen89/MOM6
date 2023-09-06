@@ -93,6 +93,11 @@ type, public :: thermo_var_ptrs
   logical :: S_is_absS = .false. !< If true, the salinity variable tv%S is
                          !! actually the absolute salinity in units of [gSalt kg-1].
   real :: min_salinity   !< The minimum value of salinity when BOUND_SALINITY=True [S ~> ppt].
+  real, allocatable, dimension(:,:,:) :: SpV_avg
+                         !< The layer averaged in situ specific volume [R-1 ~> m3 kg-1].
+  integer :: valid_SpV_halo = -1 !< If positive, the valid halo size for SpV_avg, or if negative
+                         !! SpV_avg is not currently set.
+
   ! These arrays are accumulated fluxes for communication with other components.
   real, dimension(:,:), pointer :: frazil => NULL()
                          !< The energy needed to heat the ocean column to the
@@ -101,7 +106,7 @@ type, public :: thermo_var_ptrs
   real, dimension(:,:), pointer :: salt_deficit => NULL()
                          !<   The salt needed to maintain the ocean column
                          !! at a minimum salinity of MIN_SALINITY since the last time
-                         !! that calculate_surface_state was called, [ppt R Z ~> gSalt m-2].
+                         !! that calculate_surface_state was called, [S R Z ~> gSalt m-2].
   real, dimension(:,:), pointer :: TempxPmE => NULL()
                          !<   The net inflow of water into the ocean times the
                          !! temperature at which this inflow occurs since the
@@ -168,6 +173,10 @@ type, public :: accel_diag_ptrs
     PFv => NULL(), &       !< Meridional acceleration due to pressure forces [L T-2 ~> m s-2]
     du_dt_visc => NULL(), &!< Zonal acceleration due to vertical viscosity [L T-2 ~> m s-2]
     dv_dt_visc => NULL(), &!< Meridional acceleration due to vertical viscosity [L T-2 ~> m s-2]
+    du_dt_visc_gl90 => NULL(), &!< Zonal acceleration due to GL90 vertical viscosity
+                           ! (is included in du_dt_visc) [L T-2 ~> m s-2]
+    dv_dt_visc_gl90 => NULL(), &!< Meridional acceleration due to GL90 vertical viscosity
+                           ! (is included in dv_dt_visc) [L T-2 ~> m s-2]
     du_dt_str => NULL(), & !< Zonal acceleration due to the surface stress (included
                            !! in du_dt_visc) [L T-2 ~> m s-2]
     dv_dt_str => NULL(), & !< Meridional acceleration due to the surface stress (included
@@ -208,6 +217,8 @@ type, public :: cont_diag_ptrs
   real, pointer, dimension(:,:,:) :: &
     uh => NULL(), &   !< Resolved zonal layer thickness fluxes, [H L2 T-1 ~> m3 s-1 or kg s-1]
     vh => NULL(), &   !< Resolved meridional layer thickness fluxes, [H L2 T-1 ~> m3 s-1 or kg s-1]
+    uh_smooth => NULL(), & !< Interface height smoothing induced zonal volume fluxes [H L2 T-1 ~> m3 s-1 or kg s-1]
+    vh_smooth => NULL(), & !< Interface height smoothing induced meridional volume fluxes [H L2 T-1 ~> m3 s-1 or kg s-1]
     uhGM => NULL(), & !< Isopycnal height diffusion induced zonal volume fluxes [H L2 T-1 ~> m3 s-1 or kg s-1]
     vhGM => NULL()    !< Isopycnal height diffusion induced meridional volume fluxes [H L2 T-1 ~> m3 s-1 or kg s-1]
 
@@ -223,12 +234,12 @@ type, public :: vertvisc_type
   real, allocatable, dimension(:,:) :: &
     bbl_thick_u, & !< The bottom boundary layer thickness at the u-points [Z ~> m].
     bbl_thick_v, & !< The bottom boundary layer thickness at the v-points [Z ~> m].
-    kv_bbl_u, &    !< The bottom boundary layer viscosity at the u-points [Z2 T-1 ~> m2 s-1].
-    kv_bbl_v, &    !< The bottom boundary layer viscosity at the v-points [Z2 T-1 ~> m2 s-1].
-    ustar_BBL, &   !< The turbulence velocity in the bottom boundary layer at h points [Z T-1 ~> m s-1].
+    kv_bbl_u, &    !< The bottom boundary layer viscosity at the u-points [H Z T-1 ~> m2 s-1 or Pa s]
+    kv_bbl_v, &    !< The bottom boundary layer viscosity at the v-points [H Z T-1 ~> m2 s-1 or Pa s]
+    ustar_BBL, &   !< The turbulence velocity in the bottom boundary layer at
+                   !! h points [H T-1 ~> m s-1 or kg m-2 s-1].
     TKE_BBL, &     !< A term related to the bottom boundary layer source of turbulent kinetic
-                   !! energy, currently in [Z3 T-3 ~> m3 s-3], but may at some time be changed
-                   !! to [R Z3 T-3 ~> W m-2].
+                   !! energy, currently in [H Z2 T-3 ~> m3 s-3 or W m-2].
     taux_shelf, &  !< The zonal stresses on the ocean under shelves [R Z L T-2 ~> Pa].
     tauy_shelf     !< The meridional stresses on the ocean under shelves [R Z L T-2 ~> Pa].
   real, allocatable, dimension(:,:) :: tbl_thick_shelf_u
@@ -236,9 +247,11 @@ type, public :: vertvisc_type
   real, allocatable, dimension(:,:) :: tbl_thick_shelf_v
                 !< Thickness of the viscous top boundary layer under ice shelves at v-points [Z ~> m].
   real, allocatable, dimension(:,:) :: kv_tbl_shelf_u
-                !< Viscosity in the viscous top boundary layer under ice shelves at u-points [Z2 T-1 ~> m2 s-1].
+                !< Viscosity in the viscous top boundary layer under ice shelves at
+                !! u-points [H Z T-1 ~> m2 s-1 or Pa s]
   real, allocatable, dimension(:,:) :: kv_tbl_shelf_v
-                !< Viscosity in the viscous top boundary layer under ice shelves at v-points [Z2 T-1 ~> m2 s-1].
+                !< Viscosity in the viscous top boundary layer under ice shelves at
+                !! v-points [H Z T-1 ~> m2 s-1 or Pa s]
   real, allocatable, dimension(:,:) :: nkml_visc_u
                 !< The number of layers in the viscous surface mixed layer at u-points [nondim].
                 !! This is not an integer because there may be fractional layers, and it is stored in
@@ -247,24 +260,24 @@ type, public :: vertvisc_type
   real, allocatable, dimension(:,:) :: nkml_visc_v
                 !< The number of layers in the viscous surface mixed layer at v-points [nondim].
   real, allocatable, dimension(:,:,:) :: &
-    Ray_u, &    !< The Rayleigh drag velocity to be applied to each layer at u-points [Z T-1 ~> m s-1].
-    Ray_v       !< The Rayleigh drag velocity to be applied to each layer at v-points [Z T-1 ~> m s-1].
+    Ray_u, &    !< The Rayleigh drag velocity to be applied to each layer at u-points [H T-1 ~> m s-1 or Pa s m-1].
+    Ray_v       !< The Rayleigh drag velocity to be applied to each layer at v-points [H T-1 ~> m s-1 or Pa s m-1].
 
   ! The following elements are pointers so they can be used as targets for pointers in the restart registry.
-  real, pointer, dimension(:,:) :: &
-    MLD => NULL()  !< Instantaneous active mixing layer depth [Z ~> m].
+  real, pointer, dimension(:,:) :: MLD => NULL() !< Instantaneous active mixing layer depth [Z ~> m].
+  real, pointer, dimension(:,:) :: sfc_buoy_flx => NULL() !< Surface buoyancy flux (derived) [Z2 T-3 ~> m2 s-3].
   real, pointer, dimension(:,:,:) :: Kd_shear => NULL()
                 !< The shear-driven turbulent diapycnal diffusivity at the interfaces between layers
-                !! in tracer columns [Z2 T-1 ~> m2 s-1].
+                !! in tracer columns [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
   real, pointer, dimension(:,:,:) :: Kv_shear => NULL()
                 !< The shear-driven turbulent vertical viscosity at the interfaces between layers
-                !! in tracer columns [Z2 T-1 ~> m2 s-1].
+                !! in tracer columns [H Z T-1 ~> m2 s-1 or Pa s]
   real, pointer, dimension(:,:,:) :: Kv_shear_Bu => NULL()
                 !< The shear-driven turbulent vertical viscosity at the interfaces between layers in
-                !! corner columns [Z2 T-1 ~> m2 s-1].
+                !! corner columns [H Z T-1 ~> m2 s-1 or Pa s]
   real, pointer, dimension(:,:,:) :: Kv_slow  => NULL()
                 !< The turbulent vertical viscosity component due to "slow" processes (e.g., tidal,
-                !! background, convection etc) [Z2 T-1 ~> m2 s-1].
+                !! background, convection etc) [H Z T-1 ~> m2 s-1 or Pa s]
   real, pointer, dimension(:,:,:) :: TKE_turb => NULL()
                 !< The turbulent kinetic energy per unit mass at the interfaces [Z2 T-2 ~> m2 s-2].
                 !! This may be at the tracer or corner points

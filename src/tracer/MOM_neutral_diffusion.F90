@@ -48,7 +48,7 @@ type, public :: neutral_diffusion_CS ; private
   logical :: hard_fail_heff !< Bring down the model if a problem with heff is detected
   integer :: max_iter !< Maximum number of iterations if refine_position is defined
   real :: drho_tol    !< Convergence criterion representing density difference from true neutrality [R ~> kg m-3]
-  real :: x_tol       !< Convergence criterion for how small an update of the position can be
+  real :: x_tol       !< Convergence criterion for how small an update of the position can be [nondim]
   real :: ref_pres    !< Reference pressure, negative if using locally referenced neutral
                       !! density [R L2 T-2 ~> Pa]
   logical :: interior_only !< If true, only applies neutral diffusion in the ocean interior.
@@ -56,15 +56,15 @@ type, public :: neutral_diffusion_CS ; private
   logical :: use_unmasked_transport_bug !< If true, use an older form for the accumulation of
                       !! neutral-diffusion transports that were unmasked, as used prior to Jan 2018.
   ! Positions of neutral surfaces in both the u, v directions
-  real,    allocatable, dimension(:,:,:) :: uPoL  !< Non-dimensional position with left layer uKoL-1, u-point
-  real,    allocatable, dimension(:,:,:) :: uPoR  !< Non-dimensional position with right layer uKoR-1, u-point
+  real,    allocatable, dimension(:,:,:) :: uPoL  !< Non-dimensional position with left layer uKoL-1, u-point [nondim]
+  real,    allocatable, dimension(:,:,:) :: uPoR  !< Non-dimensional position with right layer uKoR-1, u-point [nondim]
   integer, allocatable, dimension(:,:,:) :: uKoL  !< Index of left interface corresponding to neutral surface,
                                                   !! at a u-point
   integer, allocatable, dimension(:,:,:) :: uKoR  !< Index of right interface corresponding to neutral surface,
                                                   !! at a u-point
   real,    allocatable, dimension(:,:,:) :: uHeff !< Effective thickness at u-point [H ~> m or kg m-2]
-  real,    allocatable, dimension(:,:,:) :: vPoL  !< Non-dimensional position with left layer uKoL-1, v-point
-  real,    allocatable, dimension(:,:,:) :: vPoR  !< Non-dimensional position with right layer uKoR-1, v-point
+  real,    allocatable, dimension(:,:,:) :: vPoL  !< Non-dimensional position with left layer uKoL-1, v-point [nondim]
+  real,    allocatable, dimension(:,:,:) :: vPoR  !< Non-dimensional position with right layer uKoR-1, v-point [nondim]
   integer, allocatable, dimension(:,:,:) :: vKoL  !< Index of left interface corresponding to neutral surface,
                                                   !! at a v-point
   integer, allocatable, dimension(:,:,:) :: vKoR  !< Index of right interface corresponding to neutral surface,
@@ -129,10 +129,6 @@ logical function neutral_diffusion_init(Time, G, GV, US, param_file, diag, EOS, 
   ! Local variables
   character(len=80)  :: string  ! Temporary strings
   integer :: default_answer_date  ! The default setting for the various ANSWER_DATE flags.
-  logical :: default_2018_answers ! The default setting for the various 2018_ANSWERS flags.
-  logical :: remap_answers_2018    ! If true, use the order of arithmetic and expressions that
-                                   ! recover the answers for remapping from the end of 2018.
-                                   ! Otherwise, use more robust forms of the same expressions.
   logical :: boundary_extrap
 
   if (associated(CS)) then
@@ -167,7 +163,7 @@ logical function neutral_diffusion_init(Time, G, GV, US, param_file, diag, EOS, 
   call get_param(param_file, mdl, "NDIFF_REF_PRES", CS%ref_pres,                    &
                  "The reference pressure (Pa) used for the derivatives of "//&
                  "the equation of state. If negative (default), local pressure is used.", &
-                 units="Pa", default = -1., scale=US%kg_m3_to_R*US%m_s_to_L_T**2)
+                 units="Pa", default=-1., scale=US%Pa_to_RL2_T2)
   call get_param(param_file, mdl, "NDIFF_INTERIOR_ONLY", CS%interior_only, &
                  "If true, only applies neutral diffusion in the ocean interior."//&
                  "That is, the algorithm will exclude the surface and bottom"//&
@@ -191,23 +187,13 @@ logical function neutral_diffusion_init(Time, G, GV, US, param_file, diag, EOS, 
     call get_param(param_file, mdl, "DEFAULT_ANSWER_DATE", default_answer_date, &
                  "This sets the default value for the various _ANSWER_DATE parameters.", &
                  default=99991231)
-    call get_param(param_file, mdl, "DEFAULT_2018_ANSWERS", default_2018_answers, &
-                 "This sets the default value for the various _2018_ANSWERS parameters.", &
-                 default=(default_answer_date<20190101))
-    call get_param(param_file, mdl, "REMAPPING_2018_ANSWERS", remap_answers_2018, &
-                 "If true, use the order of arithmetic and expressions that recover the "//&
-                 "answers from the end of 2018.  Otherwise, use updated and more robust "//&
-                 "forms of the same expressions.", default=default_2018_answers)
-    ! Revise inconsistent default answer dates for remapping.
-    if (remap_answers_2018 .and. (default_answer_date >= 20190101)) default_answer_date = 20181231
-    if (.not.remap_answers_2018 .and. (default_answer_date < 20190101)) default_answer_date = 20190101
     call get_param(param_file, mdl, "REMAPPING_ANSWER_DATE", CS%remap_answer_date, &
                  "The vintage of the expressions and order of arithmetic to use for remapping.  "//&
                  "Values below 20190101 result in the use of older, less accurate expressions "//&
                  "that were in use at the end of 2018.  Higher values result in the use of more "//&
-                 "robust and accurate forms of mathematically equivalent expressions.  "//&
-                 "If both REMAPPING_2018_ANSWERS and REMAPPING_ANSWER_DATE are specified, the "//&
-                 "latter takes precedence.", default=default_answer_date)
+                 "robust and accurate forms of mathematically equivalent expressions.", &
+                 default=default_answer_date, do_not_log=.not.GV%Boussinesq)
+    if (.not.GV%Boussinesq) CS%remap_answer_date = max(CS%remap_answer_date, 20230701)
     call initialize_remapping( CS%remap_CS, string, boundary_extrapolation=boundary_extrap, &
                                answer_date=CS%remap_answer_date )
     call extract_member_remapping_CS(CS%remap_CS, degree=CS%deg)
@@ -229,26 +215,26 @@ logical function neutral_diffusion_init(Time, G, GV, US, param_file, diag, EOS, 
                    "               pressure dependence",                           &
                    default="mid_pressure")
     if (CS%neutral_pos_method > 1) then
-      call get_param(param_file, mdl, "NDIFF_DRHO_TOL", CS%drho_tol,            &
-                     "Sets the convergence criterion for finding the neutral\n"// &
-                     "position within a layer in kg m-3.",                        &
-                     default=1.e-10, scale=US%kg_m3_to_R)
-      call get_param(param_file, mdl, "NDIFF_X_TOL", CS%x_tol,            &
-                     "Sets the convergence criterion for a change in nondim\n"// &
-                     "position within a layer.",                        &
-                     default=0.)
+      call get_param(param_file, mdl, "NDIFF_DRHO_TOL", CS%drho_tol, &
+                     "Sets the convergence criterion for finding the neutral "// &
+                     "position within a layer in kg m-3.", &
+                     units="kg m-3", default=1.e-10, scale=US%kg_m3_to_R)
+      call get_param(param_file, mdl, "NDIFF_X_TOL", CS%x_tol, &
+                     "Sets the convergence criterion for a change in nondimensional "// &
+                     "position within a layer.", &
+                     units="nondim", default=0.)
       call get_param(param_file, mdl, "NDIFF_MAX_ITER", CS%max_iter,              &
-                    "The maximum number of iterations to be done before \n"//     &
+                     "The maximum number of iterations to be done before "//     &
                      "exiting the iterative loop to find the neutral surface",    &
                      default=10)
     endif
     call get_param(param_file, mdl, "NDIFF_DEBUG", CS%debug,             &
                    "Turns on verbose output for discontinuous neutral "//&
                    "diffusion routines.", &
-                   default = .false.)
+                   default=.false.)
     call get_param(param_file, mdl, "HARD_FAIL_HEFF", CS%hard_fail_heff, &
                   "Bring down the model if a problem with heff is detected",&
-                   default = .true.)
+                   default=.true.)
   endif
 
   if (CS%interior_only) then
