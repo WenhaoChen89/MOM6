@@ -4645,7 +4645,7 @@ subroutine register_segment_tracer(tr_ptr, ntr_index, param_file, GV, segment, &
                                                       !! data that is read in, to convert it to the internal
                                                       !! units of this tracer.
   integer,      optional, intent(in)    :: fd_index   !< index of segment tracer in the input field
-  
+
 ! Local variables
   real :: rescale ! A multiplicative correction to the scaling factor.
   integer :: ntseg, m, isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB
@@ -4820,7 +4820,7 @@ subroutine register_obgc_segments(GV, OBC, tr_Reg, param_file, tr_name)
     fd_id = -1
     do m=1,segment%num_fields
       if (lowercase(segment%field(m)%name) == lowercase(tr_name)) fd_id = m
-    enddo    
+    enddo
     call register_segment_tracer(tr_ptr, ntr_id, param_file, GV, segment, OBC_array=.True., fd_index=fd_id)
   enddo
 
@@ -5360,7 +5360,7 @@ subroutine update_segment_tracer_reservoirs(G, GV, uhr, vhr, h, OBC, dt, Reg)
           else
             resrv_lfac_out = segment%field(fd_id)%resrv_lfac_out
             resrv_lfac_in  = segment%field(fd_id)%resrv_lfac_in
-          endif             
+          endif
           I_scale = 1.0 ; if (segment%tr_Reg%Tr(m)%scale /= 0.0) I_scale = 1.0 / segment%tr_Reg%Tr(m)%scale
           if (allocated(segment%tr_Reg%Tr(m)%tres)) then ; do k=1,nz
             ! Calculate weights. Both a and u_L are nodim. Adding them together has no meaning.
@@ -5404,7 +5404,7 @@ subroutine update_segment_tracer_reservoirs(G, GV, uhr, vhr, h, OBC, dt, Reg)
           else
             resrv_lfac_out = segment%field(fd_id)%resrv_lfac_out
             resrv_lfac_in  = segment%field(fd_id)%resrv_lfac_in
-          endif           
+          endif
           I_scale = 1.0 ; if (segment%tr_Reg%Tr(m)%scale /= 0.0) I_scale = 1.0 / segment%tr_Reg%Tr(m)%scale
           if (allocated(segment%tr_Reg%Tr(m)%tres)) then ; do k=1,nz
             a_out = b_out * max(0.0, sign(1.0, jdir*vhr(i,J,k)))
