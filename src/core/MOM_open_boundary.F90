@@ -5413,7 +5413,6 @@ subroutine update_segment_tracer_reservoirs(G, GV, uhr, vhr, h, OBC, dt, Reg)
                       ((h(i,j+jshift,k) + GV%H_subroundoff)*G%dxCv(i,J)))
             v_L_in  = min(0.0, (jdir*vhr(i,J,k))*segment%Tr_InvLscale_in*resrv_lfac_in  / &
                       ((h(i,j+jshift,k) + GV%H_subroundoff)*G%dxCv(i,J)))
-            fac1 = 1.0 + (v_L_out-v_L_in)
             fac1 = (1.0 - (a_out - a_in)) + ((v_L_out + a_out) - (v_L_in + a_in))
             segment%tr_Reg%Tr(m)%tres(i,J,k) = (1.0/fac1) * &
                               ((1.0-a_out+a_in)*segment%tr_Reg%Tr(m)%tres(i,J,k) + &
