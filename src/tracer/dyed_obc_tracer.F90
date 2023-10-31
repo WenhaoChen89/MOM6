@@ -148,7 +148,7 @@ subroutine initialize_dyed_obc_tracer(restart, day, G, GV, h, diag, OBC, CS)
   integer :: i, j, k, is, ie, js, je, isd, ied, jsd, jed, nz, m
   integer :: IsdB, IedB, JsdB, JedB
   real, pointer :: tr_ptr(:,:,:) => NULL()
-  
+
   if (.not.associated(CS)) return
   if (CS%ntr < 1) return
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
