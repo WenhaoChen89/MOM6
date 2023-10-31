@@ -176,20 +176,20 @@ subroutine initialize_dyed_obc_tracer(restart, day, G, GV, h, diag, OBC, CS)
             -50 < G%geoLatT(i,j) .and. &
             50 >= G%geoLatT(i,j) .and. &
             G%mask2dT(i,j) > 0.0 ) then
-          do k=1,nz ; 
+          do k=1,nz;
             CS%tr(i,j,k,m) = 1.0
-          enddo; 
+          enddo;
         endif
       enddo ; enddo ; enddo
     endif
   endif ! restart
 
-  ! obc 
+  ! obc
   do m=1,CS%ntr
     tr_ptr => CS%tr(:,:,:,m)
     call fill_obgc_segments(G, GV, OBC, tr_ptr, CS%tr_desc(m)%name)
   enddo
-  
+
 end subroutine initialize_dyed_obc_tracer
 
 !> This subroutine applies diapycnal diffusion and any other column
