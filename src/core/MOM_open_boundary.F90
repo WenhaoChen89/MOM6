@@ -4331,6 +4331,7 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
               segment%nudged_tangential_vel(I,J,:) = segment%tangential_vel(I,J,:)
           enddo
         endif
+        cycle
       elseif (trim(segment%field(m)%name) == 'DVDX' .and. segment%is_E_or_W .and. &
               allocated(segment%tangential_grad)) then
         I=is_obc
@@ -4341,6 +4342,7 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
               segment%nudged_tangential_grad(I,J,:) = segment%tangential_grad(I,J,:)
           enddo
         enddo
+        cycle
       elseif (trim(segment%field(m)%name) == 'DUDY' .and. segment%is_N_or_S .and. &
               allocated(segment%tangential_grad)) then
         J=js_obc
@@ -4351,6 +4353,7 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
               segment%nudged_tangential_grad(I,J,:) = segment%tangential_grad(I,J,:)
           enddo
         enddo
+        cycle
       endif
 
       ! endif
@@ -4402,6 +4405,7 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
             enddo
           enddo
         endif
+        cycle
       endif
 
       if (trim(segment%field(m)%name) == 'TEMP') then
@@ -4434,7 +4438,7 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
         else
           segment%tr_Reg%Tr(2)%OBC_inflow_conc = segment%field(m)%value
         endif
-      elseif (trim(segment%field(m)%genre) == 'obgc') then
+      else
         nt=get_tracer_index(segment,trim(segment%field(m)%name))
         if(nt .lt. 0) then
           call MOM_error(FATAL,"update_OBC_segment_data: Did not find tracer "//trim(segment%field(m)%name))
@@ -5352,6 +5356,7 @@ subroutine update_segment_tracer_reservoirs(G, GV, uhr, vhr, h, OBC, dt, Reg)
         if (G%mask2dT(I+ishift,j) == 0.0) cycle
         ! Update the reservoir tracer concentration implicitly using a Backward-Euler timestep
         do m=1,segment%tr_Reg%ntseg
+          if(segment%tr_Reg%Tr(m)%name == 'salt' .or. segment%tr_Reg%Tr(m)%name == 'temp') cycle
           ntr_id = segment%tr_reg%Tr(m)%ntr_index
           fd_id = segment%tr_reg%Tr(m)%fd_index
           if(fd_id == -1) then
@@ -5396,6 +5401,7 @@ subroutine update_segment_tracer_reservoirs(G, GV, uhr, vhr, h, OBC, dt, Reg)
         if (G%mask2dT(i,j+jshift) == 0.0) cycle
         ! Update the reservoir tracer concentration implicitly using a Backward-Euler timestep
         do m=1,segment%tr_Reg%ntseg
+          if(segment%tr_Reg%Tr(m)%name == 'salt' .or. segment%tr_Reg%Tr(m)%name == 'temp') cycle
           ntr_id = segment%tr_reg%Tr(m)%ntr_index
           fd_id = segment%tr_reg%Tr(m)%fd_index
           if(fd_id == -1) then

@@ -11,7 +11,7 @@ use MOM_forcing_type,       only : forcing
 use MOM_hor_index,          only : hor_index_type
 use MOM_grid,               only : ocean_grid_type
 use MOM_io,                 only : file_exists, MOM_read_data, slasher, vardesc, var_desc, query_vardesc
-use MOM_open_boundary,      only : ocean_OBC_type
+use MOM_open_boundary,      only : ocean_OBC_type, fill_obgc_segments
 use MOM_restart,            only : MOM_restart_CS
 use MOM_time_manager,       only : time_type
 use MOM_tracer_registry,    only : register_tracer, tracer_registry_type
@@ -130,7 +130,7 @@ end function register_dyed_obc_tracer
 
 !> Initializes the CS%ntr tracer fields in tr(:,:,:,:) and sets up the tracer output.
 subroutine initialize_dyed_obc_tracer(restart, day, G, GV, h, diag, OBC, CS)
-  type(ocean_grid_type),                 intent(in) :: G    !< The ocean's grid structure
+  type(ocean_grid_type),                 intent(inout) :: G    !< The ocean's grid structure
   type(verticalGrid_type),               intent(in) :: GV   !< The ocean's vertical grid structure
   logical,                               intent(in) :: restart !< .true. if the fields have already
                                                                !! been read from a restart file.
@@ -147,7 +147,8 @@ subroutine initialize_dyed_obc_tracer(restart, day, G, GV, h, diag, OBC, CS)
                             ! in roundoff and can be neglected [H ~> m or kg m-2].
   integer :: i, j, k, is, ie, js, je, isd, ied, jsd, jed, nz, m
   integer :: IsdB, IedB, JsdB, JedB
-
+  real, pointer :: tr_ptr(:,:,:) => NULL()
+  
   if (.not.associated(CS)) return
   if (CS%ntr < 1) return
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -169,14 +170,26 @@ subroutine initialize_dyed_obc_tracer(restart, day, G, GV, h, diag, OBC, CS)
         call MOM_read_data(CS%tracer_IC_file, trim(name), CS%tr(:,:,:,m), G%Domain)
       enddo
     else
-      do m=1,CS%ntr
-        do k=1,nz ; do j=js,je ; do i=is,ie
-          CS%tr(i,j,k,m) = 0.0
-        enddo ; enddo ; enddo
-      enddo
+      do m=1,CS%ntr; do j=js,je ; do i=is,ie
+        if (-150.0 < G%geoLonT(i,j) .and. &
+            150.0 >= G%geoLonT(i,j) .and. &
+            -50 < G%geoLatT(i,j) .and. &
+            50 >= G%geoLatT(i,j) .and. &
+            G%mask2dT(i,j) > 0.0 ) then
+          do k=1,nz ; 
+            CS%tr(i,j,k,m) = 1.0
+          enddo; 
+        endif
+      enddo ; enddo ; enddo
     endif
   endif ! restart
 
+  ! obc 
+  do m=1,CS%ntr
+    tr_ptr => CS%tr(:,:,:,m)
+    call fill_obgc_segments(G, GV, OBC, tr_ptr, CS%tr_desc(m)%name)
+  enddo
+  
 end subroutine initialize_dyed_obc_tracer
 
 !> This subroutine applies diapycnal diffusion and any other column

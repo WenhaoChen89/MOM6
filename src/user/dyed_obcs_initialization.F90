@@ -66,15 +66,9 @@ subroutine dyed_obcs_set_OBC_data(OBC, G, GV, param_file, tr_Reg)
     write(name,'("dye_",I2.2)') m
     write(longname,'("Concentration of dyed_obc Tracer ",I2.2, " on segment ",I2.2)') m, m
     call tracer_name_lookup(tr_Reg, ntr_id, tr_ptr, name)
-
     do n=1,OBC%number_of_segments
-      if (n == m) then
-        dye = 1.0
-      else
-        dye = 0.0
-      endif
       call register_segment_tracer(tr_ptr, ntr_id, param_file, GV, &
-                                   OBC%segment(n), OBC_scalar=dye)
+                                   OBC%segment(n),  OBC_array=.true.)
     enddo
   enddo
 

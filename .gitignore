@@ -12,3 +12,10 @@ config.status
 configure
 /Makefile
 Makefile.mkmf
+*.o
+*.mod
+*.dep
+build/Makefile
+build/MOM6
+pkg/CVMix-src
+pkg/GSW-Fortran
