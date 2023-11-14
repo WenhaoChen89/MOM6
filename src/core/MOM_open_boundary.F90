@@ -3990,6 +3990,7 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
         endif
 
         ! This is where the data values are actually read in.
+        ! A fatal checker should be implemented to check input file size
         call time_interp_external(segment%field(m)%handle, Time, tmp_buffer_in, scale=segment%field(m)%scale)
 
         ! NOTE: Rotation of face-points require that we skip the final value
@@ -4358,6 +4359,7 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
               segment%nudged_tangential_vel(I,J,:) = segment%tangential_vel(I,J,:)
           enddo
         endif
+        cycle
       elseif (trim(segment%field(m)%name) == 'DVDX' .and. segment%is_E_or_W .and. &
               allocated(segment%tangential_grad)) then
         I=is_obc
@@ -4368,6 +4370,7 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
               segment%nudged_tangential_grad(I,J,:) = segment%tangential_grad(I,J,:)
           enddo
         enddo
+        cycle
       elseif (trim(segment%field(m)%name) == 'DUDY' .and. segment%is_N_or_S .and. &
               allocated(segment%tangential_grad)) then
         J=js_obc
@@ -4378,6 +4381,7 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
               segment%nudged_tangential_grad(I,J,:) = segment%tangential_grad(I,J,:)
           enddo
         enddo
+        cycle
       endif
 
       ! endif
@@ -4429,6 +4433,7 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
             enddo
           enddo
         endif
+        cycle
       endif
 
       if (trim(segment%field(m)%name) == 'TEMP') then
@@ -4462,6 +4467,25 @@ subroutine update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
           segment%tr_Reg%Tr(2)%OBC_inflow_conc = segment%field(m)%value
         endif
       elseif (trim(segment%field(m)%genre) == 'obgc') then
+        nt=get_tracer_index(segment,trim(segment%field(m)%name))
+        if(nt .lt. 0) then
+          call MOM_error(FATAL,"update_OBC_segment_data: Did not find tracer "//trim(segment%field(m)%name))
+        endif
+        if (allocated(segment%field(m)%buffer_dst)) then
+          do k=1,nz; do j=js_obc2, je_obc; do i=is_obc2,ie_obc
+            segment%tr_Reg%Tr(nt)%t(i,j,k) = segment%field(m)%buffer_dst(i,j,k)
+          enddo ; enddo ; enddo
+          if (.not. segment%tr_Reg%Tr(nt)%is_initialized) then
+            !if the tracer reservoir has not yet been initialized, then set to external value.
+            do k=1,nz; do j=js_obc2, je_obc; do i=is_obc2,ie_obc
+              segment%tr_Reg%Tr(nt)%tres(i,j,k) = segment%tr_Reg%Tr(nt)%t(i,j,k)
+            enddo ; enddo ; enddo
+            segment%tr_Reg%Tr(nt)%is_initialized=.true.
+          endif
+        else
+          segment%tr_Reg%Tr(nt)%OBC_inflow_conc = segment%field(m)%value
+        endif
+      else ! This is to include all other tracers. Identical to obgc. Can be merged with obgc if needed.
         nt=get_tracer_index(segment,trim(segment%field(m)%name))
         if(nt .lt. 0) then
           call MOM_error(FATAL,"update_OBC_segment_data: Did not find tracer "//trim(segment%field(m)%name))
